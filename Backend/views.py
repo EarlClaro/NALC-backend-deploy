@@ -55,7 +55,7 @@ else:
 # def get_openai_api_key():
 #     try:
 #         # Directly return the OpenAI API key
-#         api_key = "sk-W90Ia71zv_mmq7LjqIo14KAof7iNvK-LnUIn8kqr51T3BlbkFJLg_cDgbK95ydsZXFO9aZ9bIg2NtDRse1mePtO9IhkA"  # Replace with your actual OpenAI API key
+#         api_key = ""  # Replace with your actual OpenAI API key
 #         print(f"API Key found: {api_key}")
 #         return api_key
 #     except Exception as e:
