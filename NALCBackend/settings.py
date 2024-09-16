@@ -116,27 +116,27 @@ WSGI_APPLICATION = 'NALCBackend.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.mysql',
-#         'NAME': 'nalc_schema',
-#         'USER': 'narralink',  
-#         'PASSWORD': 'July82001Cl@ro',
-#         'HOST': 'ipamsdjango.mysql.database.azure.com',
-#         'PORT': '3306',
-#     }
-# }
-
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'nalc_schema',
-        'USER': 'root',  
-        'PASSWORD': 'password',
-        'HOST': 'localhost',
+        'USER': 'narralink',  
+        'PASSWORD': 'July82001Cl@ro',
+        'HOST': 'ipamsdjango.mysql.database.azure.com',
         'PORT': '3306',
     }
 }
+
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.mysql',
+#         'NAME': 'nalc_schema',
+#         'USER': 'root',  
+#         'PASSWORD': 'password',
+#         'HOST': 'localhost',
+#         'PORT': '3306',
+#     }
+# }
 
 
 

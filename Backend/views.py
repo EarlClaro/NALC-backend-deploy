@@ -28,7 +28,9 @@ from django.utils.timezone import now
 
 def get_openai_api_key():
     try:
+        # Ensure you're connecting to the correct database schema (nalc_schema)
         with connections['default'].cursor() as cursor:
+            # Execute the query to retrieve the API key from nalc_schema
             cursor.execute("""
                 SELECT api_key FROM backend_openai_api WHERE id = 1
             """)
@@ -43,19 +45,41 @@ def get_openai_api_key():
         print(f"Error retrieving API key: {e}")
         return None
 
-# Fetch and set the OpenAI API key from the database
+# Fetch and set the OpenAI API key from the Azure MySQL database (nalc_schema)
 openai_api_key = get_openai_api_key()
 if openai_api_key:
     os.environ["OPENAI_API_KEY"] = openai_api_key
 else:
     raise ValueError("OpenAI API key not found.")
 
+# def get_openai_api_key():
+#     try:
+#         # Directly return the OpenAI API key
+#         api_key = ""  # Replace with your actual OpenAI API key
+#         print(f"API Key found: {api_key}")
+#         return api_key
+#     except Exception as e:
+#         print(f"Error retrieving API key: {e}")
+#         return None
+
+# # Fetch and set the OpenAI API key directly
+# openai_api_key = get_openai_api_key()
+# if openai_api_key:
+#     os.environ["OPENAI_API_KEY"] = openai_api_key
+# else:
+#     raise ValueError("OpenAI API key not found.")
 
 # Initialize OpenAI with the API key
 llm = OpenAI(temperature=0, verbose=True)
 
 # Create the SQLDatabase instance with the MySQL connection URI
-db = SQLDatabase.from_uri(f"mysql://{settings.DATABASES['default']['USER']}:{settings.DATABASES['default']['PASSWORD']}@{settings.DATABASES['default']['HOST']}:{settings.DATABASES['default']['PORT']}/{settings.DATABASES['default']['NAME']}", include_tables=[])
+# db = SQLDatabase.from_uri(f"mysql://{settings.DATABASES['default']['USER']}:{settings.DATABASES['default']['PASSWORD']}@{settings.DATABASES['default']['HOST']}:{settings.DATABASES['default']['PORT']}/{settings.DATABASES['default']['NAME']}", include_tables=[])
+db = SQLDatabase.from_uri(f"mysql://{settings.DATABASES['default']['USER']}:{settings.DATABASES['default']['PASSWORD'].replace('@', '%40')}@{settings.DATABASES['default']['HOST']}:{settings.DATABASES['default']['PORT']}/{settings.DATABASES['default']['NAME']}", include_tables=[])
+
+
+# connection_uri = f"mysql://{settings.DATABASES['default']['USER']}:{settings.DATABASES['default']['PASSWORD']}@{settings.DATABASES['default']['HOST']}:{settings.DATABASES['default']['PORT']}/{settings.DATABASES['default']['NAME']}"
+# print("Connection URI:", connection_uri)  # Add this to debug the URI
+# db = SQLDatabase.from_uri(connection_uri, include_tables=[])
 
 llm = OpenAI(temperature=0, verbose=True)
 
