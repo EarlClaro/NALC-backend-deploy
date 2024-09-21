@@ -122,10 +122,10 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'nalc_schema',
-        'USER': 'narralink',  
-        'PASSWORD': 'July82001Cl@ro',
-        'HOST': 'ipamsdjango.mysql.database.azure.com',
-        'PORT': '3306',
+        'USER': 'doadmin',  
+        'PASSWORD': 'AVNS_04uBQHFP1EbEurK1Xsj',
+        'HOST': 'ipamsdjango-do-user-17750378-0.g.db.ondigitalocean.com',
+        'PORT': '25060',
     }
 }
 
