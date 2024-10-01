@@ -226,9 +226,10 @@ class MessageCreateView(generics.CreateAPIView):
 
         # Call db_chain with the combined_query to consider past conversation
         try:
-            response = db_chain(combined_query)
+            response = db_chain.invoke(combined_query)  # Use invoke instead of call
             if response is None:
-                raise ValueError("db_chain returned None for query")
+                logger.error("db_chain returned None for query: %s", combined_query)
+                return Response({"error": "Error processing the query."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
             logger.debug("Response from db_chain: %s", response)
 
@@ -276,8 +277,6 @@ class MessageCreateView(generics.CreateAPIView):
 
         headers = self.get_success_headers(serializer.data)
         return Response({"message": "Message created", "data": serializer.data}, status=status.HTTP_201_CREATED, headers=headers)
-
-
 
 
 
