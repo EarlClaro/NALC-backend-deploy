@@ -43,13 +43,19 @@ class User(AbstractBaseUser, PermissionsMixin):
     def get_full_name(self):
         return self.name
 
+from django.db import models
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+
 class UserMessageLog(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     message_count = models.IntegerField(default=0)
     last_reset = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.user.email} - Count: {self.message_count} - Last Reset: {self.last_reset}"
+        return f"{self.user.email} - Messages sent: {self.message_count}"
+
 
 
 class researchpaper(models.Model):

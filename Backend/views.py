@@ -189,17 +189,20 @@ class UserThreadListView(generics.ListAPIView):
         queryset = Thread.objects.filter(user=user)
         return queryset
 
-from datetime import timedelta 
-from .models import Thread, Message, UserMessageLog  
-from .serializers import MessageSerializer
+import logging
 from django.utils.timezone import now
-from datetime import timedelta  # Ensure this line is included
+from datetime import timedelta
 from rest_framework import generics, status
 from rest_framework.response import Response
-from .models import Thread, Message, UserMessageLog  # Import UserMessageLog as needed
-from .serializers import MessageSerializer
-from django.shortcuts import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
+from django.shortcuts import get_object_or_404
+import json
+
+from .models import Thread, Message, UserMessageLog  # Ensure UserMessageLog is imported
+from .serializers import MessageSerializer
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 class MessageCreateView(generics.CreateAPIView):
     queryset = Message.objects.all()
@@ -208,17 +211,22 @@ class MessageCreateView(generics.CreateAPIView):
 
     def create(self, request, *args, **kwargs):
         thread_id = request.data.get("thread_id")
+        query = request.data.get("query")
+
+        # Check for required fields
         if not thread_id:
+            logger.error("Thread ID is missing.")
             return Response({"error": "Thread ID is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        thread = get_object_or_404(Thread, pk=thread_id)
-
-        query = request.data.get("query")
         if not query:
+            logger.error("Query is missing.")
             return Response({"error": "Query is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Check message limit logic
+        # Get the thread and user
+        thread = get_object_or_404(Thread, pk=thread_id)
         user = request.user
+
+        # Check message limit logic
         message_log, created = UserMessageLog.objects.get_or_create(user=user)
 
         # Reset message count if 24 hours have passed
@@ -230,6 +238,7 @@ class MessageCreateView(generics.CreateAPIView):
         # Check if user is a STANDARD subscriber
         if user.subscription == 'STANDARD':
             if message_log.message_count >= 10:
+                logger.warning("Message limit reached for user: %s", user.email)
                 return Response({"error": "Message limit reached. Please try again after 24 hours."}, 
                                 status=status.HTTP_429_TOO_MANY_REQUESTS)
 
@@ -242,21 +251,21 @@ class MessageCreateView(generics.CreateAPIView):
         combined_query = history_text + "\nUser: " + query
 
         # Call db_chain with the combined_query to consider past conversation
-        response = db_chain(combined_query)
-
-        # Create a mutable copy of request.data
-        mutable_data = request.data.copy()
-        mutable_data["thread"] = thread.pk
-
-        # Structure the message_text for easy mapping in React
-        message_text = {
-            'query': query,
-            'response': response.get("result", "No result found")
-        }
-        mutable_data["message_text"] = json.dumps(message_text)
-
-        serializer = self.get_serializer(data=mutable_data)
         try:
+            response = db_chain(combined_query)  # Ensure db_chain is defined and functional
+
+            # Create a mutable copy of request.data
+            mutable_data = request.data.copy()
+            mutable_data["thread"] = thread.pk
+            
+            # Structure the message_text for easy mapping in React
+            message_text = {
+                'query': query,
+                'response': response.get("result", "No result found")
+            }
+            mutable_data["message_text"] = json.dumps(message_text)
+
+            serializer = self.get_serializer(data=mutable_data)
             serializer.is_valid(raise_exception=True)
             self.perform_create(serializer)
 
@@ -265,14 +274,12 @@ class MessageCreateView(generics.CreateAPIView):
                 message_log.message_count += 1
                 message_log.save()
 
-            headers = self.get_success_headers(serializer.data)
             return Response({"message": "Message created", "data": serializer.data}, 
-                            status=status.HTTP_201_CREATED, headers=headers)
+                            status=status.HTTP_201_CREATED)
 
-        except serializers.ValidationError as e:
-            return Response({"error": e.detail}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception("An error occurred while creating a message: %s", str(e))
+            return Response({"error": "An internal server error occurred."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 
