@@ -203,6 +203,7 @@ from .serializers import MessageSerializer
 
 # Set up logging
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
 
 class MessageCreateView(generics.CreateAPIView):
     queryset = Message.objects.all()
@@ -226,7 +227,7 @@ class MessageCreateView(generics.CreateAPIView):
 
         # Call db_chain with the combined_query to consider past conversation
         try:
-            response = db_chain.invoke(combined_query)  # Use invoke instead of call
+            response = db_chain.invoke(combined_query)
             if response is None:
                 logger.error("db_chain returned None for query: %s", combined_query)
                 return Response({"error": "Error processing the query."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -251,11 +252,17 @@ class MessageCreateView(generics.CreateAPIView):
         user = request.user
         message_log, created = UserMessageLog.objects.get_or_create(user=user)
 
+        if created:
+            logger.debug("Created new UserMessageLog for user: %s", user.email)
+
         # Reset message count if 24 hours have passed
         if now() - message_log.last_reset > timedelta(days=1):
             message_log.message_count = 0
             message_log.last_reset = now()
             message_log.save()
+
+        logger.debug("User subscription: %s", user.subscription)
+        logger.debug("User message count: %d", message_log.message_count)
 
         # Check if user is a STANDARD subscriber
         if user.subscription == 'STANDARD':
