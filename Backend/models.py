@@ -18,8 +18,11 @@ class CustomUserManager(BaseUserManager):
         return self.create_user(email, password, **extra_fields)
 
 class User(AbstractBaseUser, PermissionsMixin):
-    email = models.EmailField(blank=True, default='', unique=True , max_length=30)
+    email = models.EmailField(blank=True, default='', unique=True, max_length=255)
     name = models.CharField(max_length=255, blank=True, default='')
+
+    # Subscription field without choices
+    subscription = models.CharField(max_length=255, default='FREE TRIAL')  # Default subscription set to FREE
 
     is_active = models.BooleanField(default=True)
     is_superuser = models.BooleanField(default=False)
@@ -40,6 +43,13 @@ class User(AbstractBaseUser, PermissionsMixin):
     def get_full_name(self):
         return self.name
 
+class UserMessageLog(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    message_count = models.IntegerField(default=0)
+    last_reset = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.email} - Count: {self.message_count} - Last Reset: {self.last_reset}"
 
 
 class researchpaper(models.Model):

@@ -197,29 +197,33 @@ class MessageCreateView(generics.CreateAPIView):
     def create(self, request, *args, **kwargs):
         thread_id = request.data.get("thread_id")
         thread = get_object_or_404(Thread, pk=thread_id)
-
         query = request.data.get("query")
 
         # Fetch conversation history
         conversation_history = Message.objects.filter(thread=thread).order_by('created_at')
         history_text = "\n".join([json.loads(msg.message_text)['query'] + "\n" + json.loads(msg.message_text)['response'] for msg in conversation_history])
+        combined_query = history_text + "\nUser: " + query
 
-        # Combine history with the current query
-        combined_query = history_text + "\nUser: " + query  # Make sure to label the speaker for clarity
+        # Check message limit
+        user = request.user
+        message_log, created = UserMessageLog.objects.get_or_create(user=user)
 
-        # Debug: print combined_query to check if history is correct
-        print("Combined Query for db_chain:", combined_query)
+        # Reset message count if 24 hours have passed
+        if now() - message_log.last_reset > timedelta(days=1):
+            message_log.message_count = 0
+            message_log.last_reset = now()
+            message_log.save()
+
+        # Check if user is a STANDARD subscriber
+        if user.subscription == 'STANDARD':
+            if message_log.message_count >= 10:
+                return Response({"error": "Message limit reached. Please try again after 24 hours."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
 
         # Call db_chain with the combined_query to consider past conversation
-        response = db_chain(combined_query)  # Assuming db_chain can handle this format
-
-        # Debug: print response to check what db_chain returns
-        print("Response from db_chain:", response)
+        response = db_chain(combined_query)
 
         # Create a mutable copy of request.data
         mutable_data = request.data.copy()
-
-        # Add the thread and message_text to the mutable_data
         mutable_data["thread"] = thread.pk
 
         # Structure the message_text for easy mapping in React
@@ -227,18 +231,20 @@ class MessageCreateView(generics.CreateAPIView):
             'query': query,
             'response': response.get("result", "No result found")
         }
-
-        # Set the message_text field with the structured data
         mutable_data["message_text"] = json.dumps(message_text)
 
         serializer = self.get_serializer(data=mutable_data)
         serializer.is_valid(raise_exception=True)
-
-        # Save the new message
         self.perform_create(serializer)
+
+        # Increment message count for STANDARD users
+        if user.subscription == 'STANDARD':
+            message_log.message_count += 1
+            message_log.save()
 
         headers = self.get_success_headers(serializer.data)
         return Response({"message": "Message created", "data": serializer.data}, status=status.HTTP_201_CREATED, headers=headers)
+
 
 
 class MessageListView(generics.ListAPIView):
