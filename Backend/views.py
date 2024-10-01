@@ -198,7 +198,7 @@ from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 import json
 
-from .models import Thread, Message, UserMessageLog  # Make sure UserMessageLog is imported
+from .models import Thread, Message, UserMessageLog
 from .serializers import MessageSerializer
 
 # Set up logging
@@ -220,30 +220,30 @@ class MessageCreateView(generics.CreateAPIView):
         history_text = "\n".join([json.loads(msg.message_text)['query'] + "\n" + json.loads(msg.message_text)['response'] for msg in conversation_history])
 
         # Combine history with the current query
-        combined_query = history_text + "\nUser: " + query  # Make sure to label the speaker for clarity
+        combined_query = history_text + "\nUser: " + query
 
-        # Debug: print combined_query to check if history is correct
-        print("Combined Query for db_chain:", combined_query)
+        logger.debug("Combined Query for db_chain: %s", combined_query)
 
         # Call db_chain with the combined_query to consider past conversation
-        response = db_chain(combined_query)  # Assuming db_chain can handle this format
+        try:
+            response = db_chain(combined_query)
+            if response is None:
+                raise ValueError("db_chain returned None for query")
 
-        # Debug: print response to check what db_chain returns
-        print("Response from db_chain:", response)
+            logger.debug("Response from db_chain: %s", response)
+
+            # Structure the message_text for easy mapping in React
+            message_text = {
+                'query': query,
+                'response': response.get("result", "No result found")
+            }
+        except Exception as e:
+            logger.error("Error calling db_chain: %s", str(e))
+            return Response({"error": "Error processing the query."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Create a mutable copy of request.data
         mutable_data = request.data.copy()
-
-        # Add the thread and message_text to the mutable_data
         mutable_data["thread"] = thread.pk
-
-        # Structure the message_text for easy mapping in React
-        message_text = {
-            'query': query,
-            'response': response.get("result", "No result found")
-        }
-
-        # Set the message_text field with the structured data
         mutable_data["message_text"] = json.dumps(message_text)
 
         # Check message limit for STANDARD users
@@ -260,7 +260,7 @@ class MessageCreateView(generics.CreateAPIView):
         if user.subscription == 'STANDARD':
             if message_log.message_count >= 10:
                 logger.warning("Message limit reached for user: %s", user.email)
-                return Response({"error": "Message limit reached. Please try again after 24 hours."}, 
+                return Response({"error": "Message limit reached. Please try again after 24 hours."},
                                 status=status.HTTP_429_TOO_MANY_REQUESTS)
 
         serializer = self.get_serializer(data=mutable_data)
@@ -276,6 +276,7 @@ class MessageCreateView(generics.CreateAPIView):
 
         headers = self.get_success_headers(serializer.data)
         return Response({"message": "Message created", "data": serializer.data}, status=status.HTTP_201_CREATED, headers=headers)
+
 
 
 
