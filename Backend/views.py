@@ -189,6 +189,9 @@ class UserThreadListView(generics.ListAPIView):
         queryset = Thread.objects.filter(user=user)
         return queryset
 
+from .models import Thread, Message, UserMessageLog  
+from .serializers import MessageSerializer
+
 class MessageCreateView(generics.CreateAPIView):
     queryset = Message.objects.all()
     serializer_class = MessageSerializer
@@ -196,15 +199,16 @@ class MessageCreateView(generics.CreateAPIView):
 
     def create(self, request, *args, **kwargs):
         thread_id = request.data.get("thread_id")
+        if not thread_id:
+            return Response({"error": "Thread ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+
         thread = get_object_or_404(Thread, pk=thread_id)
+
         query = request.data.get("query")
+        if not query:
+            return Response({"error": "Query is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Fetch conversation history
-        conversation_history = Message.objects.filter(thread=thread).order_by('created_at')
-        history_text = "\n".join([json.loads(msg.message_text)['query'] + "\n" + json.loads(msg.message_text)['response'] for msg in conversation_history])
-        combined_query = history_text + "\nUser: " + query
-
-        # Check message limit
+        # Check message limit logic
         user = request.user
         message_log, created = UserMessageLog.objects.get_or_create(user=user)
 
@@ -217,7 +221,16 @@ class MessageCreateView(generics.CreateAPIView):
         # Check if user is a STANDARD subscriber
         if user.subscription == 'STANDARD':
             if message_log.message_count >= 10:
-                return Response({"error": "Message limit reached. Please try again after 24 hours."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+                return Response({"error": "Message limit reached. Please try again after 24 hours."}, 
+                                status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        # Fetch conversation history
+        conversation_history = Message.objects.filter(thread=thread).order_by('created_at')
+        history_text = "\n".join([json.loads(msg.message_text)['query'] + "\n" + json.loads(msg.message_text)['response'] 
+                                   for msg in conversation_history])
+
+        # Combine history with the current query
+        combined_query = history_text + "\nUser: " + query
 
         # Call db_chain with the combined_query to consider past conversation
         response = db_chain(combined_query)
@@ -234,16 +247,23 @@ class MessageCreateView(generics.CreateAPIView):
         mutable_data["message_text"] = json.dumps(message_text)
 
         serializer = self.get_serializer(data=mutable_data)
-        serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer)
+        try:
+            serializer.is_valid(raise_exception=True)
+            self.perform_create(serializer)
 
-        # Increment message count for STANDARD users
-        if user.subscription == 'STANDARD':
-            message_log.message_count += 1
-            message_log.save()
+            # Increment message count for STANDARD users
+            if user.subscription == 'STANDARD':
+                message_log.message_count += 1
+                message_log.save()
 
-        headers = self.get_success_headers(serializer.data)
-        return Response({"message": "Message created", "data": serializer.data}, status=status.HTTP_201_CREATED, headers=headers)
+            headers = self.get_success_headers(serializer.data)
+            return Response({"message": "Message created", "data": serializer.data}, 
+                            status=status.HTTP_201_CREATED, headers=headers)
+
+        except serializers.ValidationError as e:
+            return Response({"error": e.detail}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 
