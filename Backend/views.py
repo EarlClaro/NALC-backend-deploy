@@ -189,8 +189,20 @@ class UserThreadListView(generics.ListAPIView):
         queryset = Thread.objects.filter(user=user)
         return queryset
 
-from django.utils import timezone
+import logging
 from datetime import timedelta
+from django.utils.timezone import now
+from rest_framework import generics, status
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from django.shortcuts import get_object_or_404
+import json
+
+from .models import Thread, Message, UserMessageLog  # Make sure UserMessageLog is imported
+from .serializers import MessageSerializer
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 class MessageCreateView(generics.CreateAPIView):
     queryset = Message.objects.all()
@@ -198,23 +210,8 @@ class MessageCreateView(generics.CreateAPIView):
     permission_classes = [IsAuthenticated]
 
     def create(self, request, *args, **kwargs):
-        user = request.user
         thread_id = request.data.get("thread_id")
         thread = get_object_or_404(Thread, pk=thread_id)
-
-        # Check and reset message count if needed
-        now = timezone.now()
-        reset_time = user.last_reset + timedelta(hours=24)
-
-        if now >= reset_time:
-            user.message_count = 0  # Reset count
-            user.last_reset = now  # Update last reset time
-            user.save()
-
-        # Check if the user has reached their limit
-        if user.subscription == 'STANDARD' and user.message_count >= 10:
-            return Response({"error": "Message limit reached. Please wait 24 hours to send more messages."},
-                            status=status.HTTP_429_TOO_MANY_REQUESTS)
 
         query = request.data.get("query")
 
@@ -223,10 +220,16 @@ class MessageCreateView(generics.CreateAPIView):
         history_text = "\n".join([json.loads(msg.message_text)['query'] + "\n" + json.loads(msg.message_text)['response'] for msg in conversation_history])
 
         # Combine history with the current query
-        combined_query = history_text + "\nUser: " + query
+        combined_query = history_text + "\nUser: " + query  # Make sure to label the speaker for clarity
+
+        # Debug: print combined_query to check if history is correct
+        print("Combined Query for db_chain:", combined_query)
 
         # Call db_chain with the combined_query to consider past conversation
-        response = db_chain(combined_query)
+        response = db_chain(combined_query)  # Assuming db_chain can handle this format
+
+        # Debug: print response to check what db_chain returns
+        print("Response from db_chain:", response)
 
         # Create a mutable copy of request.data
         mutable_data = request.data.copy()
@@ -243,19 +246,36 @@ class MessageCreateView(generics.CreateAPIView):
         # Set the message_text field with the structured data
         mutable_data["message_text"] = json.dumps(message_text)
 
+        # Check message limit for STANDARD users
+        user = request.user
+        message_log, created = UserMessageLog.objects.get_or_create(user=user)
+
+        # Reset message count if 24 hours have passed
+        if now() - message_log.last_reset > timedelta(days=1):
+            message_log.message_count = 0
+            message_log.last_reset = now()
+            message_log.save()
+
+        # Check if user is a STANDARD subscriber
+        if user.subscription == 'STANDARD':
+            if message_log.message_count >= 10:
+                logger.warning("Message limit reached for user: %s", user.email)
+                return Response({"error": "Message limit reached. Please try again after 24 hours."}, 
+                                status=status.HTTP_429_TOO_MANY_REQUESTS)
+
         serializer = self.get_serializer(data=mutable_data)
         serializer.is_valid(raise_exception=True)
 
         # Save the new message
         self.perform_create(serializer)
 
-        # Increment the user's message count
-        user.message_count += 1
-        user.save()
+        # Increment message count for STANDARD users
+        if user.subscription == 'STANDARD':
+            message_log.message_count += 1
+            message_log.save()
 
         headers = self.get_success_headers(serializer.data)
         return Response({"message": "Message created", "data": serializer.data}, status=status.HTTP_201_CREATED, headers=headers)
-
 
 
 

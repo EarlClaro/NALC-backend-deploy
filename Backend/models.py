@@ -28,9 +28,6 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_superuser = models.BooleanField(default=False)
     is_staff = models.BooleanField(default=False)
 
-    message_count = models.IntegerField(default=0)  # Track message count
-    last_reset = models.DateTimeField(auto_now_add=True)  # Track when the count was last reset
-
     objects = CustomUserManager()
 
     USERNAME_FIELD = 'email'
@@ -45,7 +42,6 @@ class User(AbstractBaseUser, PermissionsMixin):
         
     def get_full_name(self):
         return self.name
-
 
 from django.db import models
 from django.contrib.auth import get_user_model
