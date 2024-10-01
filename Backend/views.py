@@ -267,8 +267,8 @@ class MessageCreateView(generics.CreateAPIView):
         # Check if user is a STANDARD subscriber
         if user.subscription == 'STANDARD':
             if message_log.message_count >= 10:
-                logger.warning("Message limit reached for user: %s", user.email)
-                return Response({"error": "Message limit reached. Please try again after 24 hours."},
+                logger.warning("Message limit reached for user: %s", user.name)
+                return Response({"error": "You have reached the daily message limit. Please try again after 24 hours."},
                                 status=status.HTTP_429_TOO_MANY_REQUESTS)
 
         serializer = self.get_serializer(data=mutable_data)
