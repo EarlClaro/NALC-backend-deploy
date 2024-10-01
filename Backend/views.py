@@ -190,15 +190,15 @@ class UserThreadListView(generics.ListAPIView):
         return queryset
 
 import logging
-from django.utils.timezone import now
 from datetime import timedelta
+from django.utils.timezone import now
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 import json
 
-from .models import Thread, Message, UserMessageLog  # Ensure UserMessageLog is imported
+from .models import Thread, Message, UserMessageLog  # Make sure UserMessageLog is imported
 from .serializers import MessageSerializer
 
 # Set up logging
@@ -211,22 +211,43 @@ class MessageCreateView(generics.CreateAPIView):
 
     def create(self, request, *args, **kwargs):
         thread_id = request.data.get("thread_id")
+        thread = get_object_or_404(Thread, pk=thread_id)
+
         query = request.data.get("query")
 
-        # Check for required fields
-        if not thread_id:
-            logger.error("Thread ID is missing.")
-            return Response({"error": "Thread ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+        # Fetch conversation history
+        conversation_history = Message.objects.filter(thread=thread).order_by('created_at')
+        history_text = "\n".join([json.loads(msg.message_text)['query'] + "\n" + json.loads(msg.message_text)['response'] for msg in conversation_history])
 
-        if not query:
-            logger.error("Query is missing.")
-            return Response({"error": "Query is required."}, status=status.HTTP_400_BAD_REQUEST)
+        # Combine history with the current query
+        combined_query = history_text + "\nUser: " + query  # Make sure to label the speaker for clarity
 
-        # Get the thread and user
-        thread = get_object_or_404(Thread, pk=thread_id)
+        # Debug: print combined_query to check if history is correct
+        print("Combined Query for db_chain:", combined_query)
+
+        # Call db_chain with the combined_query to consider past conversation
+        response = db_chain(combined_query)  # Assuming db_chain can handle this format
+
+        # Debug: print response to check what db_chain returns
+        print("Response from db_chain:", response)
+
+        # Create a mutable copy of request.data
+        mutable_data = request.data.copy()
+
+        # Add the thread and message_text to the mutable_data
+        mutable_data["thread"] = thread.pk
+
+        # Structure the message_text for easy mapping in React
+        message_text = {
+            'query': query,
+            'response': response.get("result", "No result found")
+        }
+
+        # Set the message_text field with the structured data
+        mutable_data["message_text"] = json.dumps(message_text)
+
+        # Check message limit for STANDARD users
         user = request.user
-
-        # Check message limit logic
         message_log, created = UserMessageLog.objects.get_or_create(user=user)
 
         # Reset message count if 24 hours have passed
@@ -242,44 +263,20 @@ class MessageCreateView(generics.CreateAPIView):
                 return Response({"error": "Message limit reached. Please try again after 24 hours."}, 
                                 status=status.HTTP_429_TOO_MANY_REQUESTS)
 
-        # Fetch conversation history
-        conversation_history = Message.objects.filter(thread=thread).order_by('created_at')
-        history_text = "\n".join([json.loads(msg.message_text)['query'] + "\n" + json.loads(msg.message_text)['response'] 
-                                   for msg in conversation_history])
+        serializer = self.get_serializer(data=mutable_data)
+        serializer.is_valid(raise_exception=True)
 
-        # Combine history with the current query
-        combined_query = history_text + "\nUser: " + query
+        # Save the new message
+        self.perform_create(serializer)
 
-        # Call db_chain with the combined_query to consider past conversation
-        try:
-            response = db_chain(combined_query)  # Ensure db_chain is defined and functional
+        # Increment message count for STANDARD users
+        if user.subscription == 'STANDARD':
+            message_log.message_count += 1
+            message_log.save()
 
-            # Create a mutable copy of request.data
-            mutable_data = request.data.copy()
-            mutable_data["thread"] = thread.pk
-            
-            # Structure the message_text for easy mapping in React
-            message_text = {
-                'query': query,
-                'response': response.get("result", "No result found")
-            }
-            mutable_data["message_text"] = json.dumps(message_text)
+        headers = self.get_success_headers(serializer.data)
+        return Response({"message": "Message created", "data": serializer.data}, status=status.HTTP_201_CREATED, headers=headers)
 
-            serializer = self.get_serializer(data=mutable_data)
-            serializer.is_valid(raise_exception=True)
-            self.perform_create(serializer)
-
-            # Increment message count for STANDARD users
-            if user.subscription == 'STANDARD':
-                message_log.message_count += 1
-                message_log.save()
-
-            return Response({"message": "Message created", "data": serializer.data}, 
-                            status=status.HTTP_201_CREATED)
-
-        except Exception as e:
-            logger.exception("An error occurred while creating a message: %s", str(e))
-            return Response({"error": "An internal server error occurred."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 
