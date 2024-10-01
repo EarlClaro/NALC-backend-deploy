@@ -189,8 +189,17 @@ class UserThreadListView(generics.ListAPIView):
         queryset = Thread.objects.filter(user=user)
         return queryset
 
+from datetime import timedelta 
 from .models import Thread, Message, UserMessageLog  
 from .serializers import MessageSerializer
+from django.utils.timezone import now
+from datetime import timedelta  # Ensure this line is included
+from rest_framework import generics, status
+from rest_framework.response import Response
+from .models import Thread, Message, UserMessageLog  # Import UserMessageLog as needed
+from .serializers import MessageSerializer
+from django.shortcuts import get_object_or_404
+from rest_framework.permissions import IsAuthenticated
 
 class MessageCreateView(generics.CreateAPIView):
     queryset = Message.objects.all()
