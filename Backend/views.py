@@ -69,20 +69,20 @@ else:
 # else:
 #     raise ValueError("OpenAI API key not found.")
 
-from langchain.chat_models import ChatOpenAI
-from langchain_experimental.sql import SQLDatabaseChain
-from langchain_community.utilities import SQLDatabase
-
-# Use ChatOpenAI for chat-based models like gpt-4-turbo
-llm = ChatOpenAI(model="gpt-4-turbo", temperature=0, max_tokens=2000, verbose=True)
+# Initialize OpenAI with the API key
+llm = OpenAI(temperature=0, verbose=True)
 
 # Create the SQLDatabase instance with the MySQL connection URI
-db = SQLDatabase.from_uri(
-    f"mysql://{settings.DATABASES['default']['USER']}:{settings.DATABASES['default']['PASSWORD'].replace('@', '%40')}@{settings.DATABASES['default']['HOST']}:{settings.DATABASES['default']['PORT']}/{settings.DATABASES['default']['NAME']}",
-    include_tables=[]  # Adjust as necessary to include or exclude specific tables
-)
+# db = SQLDatabase.from_uri(f"mysql://{settings.DATABASES['default']['USER']}:{settings.DATABASES['default']['PASSWORD']}@{settings.DATABASES['default']['HOST']}:{settings.DATABASES['default']['PORT']}/{settings.DATABASES['default']['NAME']}", include_tables=[])
+db = SQLDatabase.from_uri(f"mysql://{settings.DATABASES['default']['USER']}:{settings.DATABASES['default']['PASSWORD'].replace('@', '%40')}@{settings.DATABASES['default']['HOST']}:{settings.DATABASES['default']['PORT']}/{settings.DATABASES['default']['NAME']}", include_tables=[])
 
-# Initialize the SQLDatabaseChain with the ChatOpenAI model
+
+# connection_uri = f"mysql://{settings.DATABASES['default']['USER']}:{settings.DATABASES['default']['PASSWORD']}@{settings.DATABASES['default']['HOST']}:{settings.DATABASES['default']['PORT']}/{settings.DATABASES['default']['NAME']}"
+# print("Connection URI:", connection_uri)  # Add this to debug the URI
+# db = SQLDatabase.from_uri(connection_uri, include_tables=[])
+
+llm = OpenAI(temperature=0, verbose=True)
+
 db_chain = SQLDatabaseChain.from_llm(llm, db, verbose=True)
 
 
@@ -188,102 +188,72 @@ class UserThreadListView(generics.ListAPIView):
         # Filter threads associated with the authenticated user
         queryset = Thread.objects.filter(user=user)
         return queryset
-import json
-import re
+
 import logging
 from datetime import timedelta
-from django.db import connections
-from django.db.models import F
 from django.utils.timezone import now
-from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from langchain_openai import ChatOpenAI  # Updated import
-import MySQLdb  # To handle MySQL-specific exceptions
-from .models import Message, Thread, UserMessageLog
+from django.shortcuts import get_object_or_404
+import json
+
+from .models import Thread, Message, UserMessageLog
 from .serializers import MessageSerializer
 
+# Set up logging
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
 
 class MessageCreateView(generics.CreateAPIView):
     queryset = Message.objects.all()
     serializer_class = MessageSerializer
     permission_classes = [IsAuthenticated]
 
-    def clean_sql_query(self, sql_query):
-        """
-        Removes Markdown-style formatting from the SQL query.
-        """
-        sql_query = re.sub(r"```sql", "", sql_query)
-        sql_query = re.sub(r"```", "", sql_query)
-        return sql_query.strip()
-
     def create(self, request, *args, **kwargs):
         thread_id = request.data.get("thread_id")
-        query = request.data.get("query")
-
-        if not thread_id or not query:
-            return Response({"error": "Thread ID and query are required."}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Fetch the thread
         thread = get_object_or_404(Thread, pk=thread_id)
+
+        query = request.data.get("query")
 
         # Fetch conversation history
         conversation_history = Message.objects.filter(thread=thread).order_by('created_at')
-        history_text = "\n".join([
-            f"User: {json.loads(msg.message_text)['query']}\nAI: {json.loads(msg.message_text)['response']}" 
-            for msg in conversation_history
-        ])
-        combined_query = history_text + f"\nUser: {query}"
+        history_text = "\n".join([json.loads(msg.message_text)['query'] + "\n" + json.loads(msg.message_text)['response'] for msg in conversation_history])
+
+        # Combine history with the current query
+        combined_query = history_text + "\nUser: " + query
 
         logger.debug("Combined Query for db_chain: %s", combined_query)
 
+        # Call db_chain with the combined_query to consider past conversation
         try:
-            # Generate SQL query using LangChain
-            response = db_chain.invoke({"query": combined_query})
-            if not response:
+            response = db_chain.invoke(combined_query)
+            if response is None:
                 logger.error("db_chain returned None for query: %s", combined_query)
                 return Response({"error": "Error processing the query."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-            # Clean the SQL query
-            sql_query = self.clean_sql_query(response.get("sql_query", ""))
-            if not sql_query:
-                logger.error("Generated SQL query is empty or invalid: %s", sql_query)
-                return Response({"error": "Generated SQL query is empty or invalid."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.debug("Response from db_chain: %s", response)
 
-            logger.debug("Cleaned SQL Query: %s", sql_query)
-
-            # Execute the cleaned SQL query
-            with connections['default'].cursor() as cursor:
-                cursor.execute(sql_query)
-                results = cursor.fetchall()
-
-            logger.debug("SQL Query Results: %s", results)
-
-            # Format the response
-            formatted_response = {
-                "query": query,
-                "response": results
+            # Structure the message_text for easy mapping in React
+            message_text = {
+                'query': query,
+                'response': response.get("result", "No result found")
             }
-
-        except MySQLdb.ProgrammingError as e:
-            logger.error("SQL Programming Error: %s", str(e))
-            return Response({"error": "Invalid SQL syntax."}, status=status.HTTP_400_BAD_REQUEST)
-        except AttributeError as e:
-            logger.error("AttributeError in callback: %s", str(e))
-            return Response({"error": "Internal server error."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         except Exception as e:
-            logger.error("Error processing the query or executing SQL: %s", str(e))
-            return Response({"error": "Error processing the query or executing SQL."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.error("Error calling db_chain: %s", str(e))
+            return Response({"error": "Error processing the query."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        # Save the message in the database
+        # Create a mutable copy of request.data
         mutable_data = request.data.copy()
         mutable_data["thread"] = thread.pk
-        mutable_data["message_text"] = json.dumps(formatted_response)
+        mutable_data["message_text"] = json.dumps(message_text)
 
+        # Check message limit for STANDARD users
         user = request.user
         message_log, created = UserMessageLog.objects.get_or_create(user=user)
+
+        if created:
+            logger.debug("Created new UserMessageLog for user: %s", user.email)
 
         # Reset message count if 24 hours have passed
         if now() - message_log.last_reset > timedelta(days=1):
@@ -291,27 +261,30 @@ class MessageCreateView(generics.CreateAPIView):
             message_log.last_reset = now()
             message_log.save()
 
-        # Limit STANDARD users to 10 messages/day
-        if user.subscription == 'STANDARD' and message_log.message_count >= 10:
-            return Response(
-                {
-                    "error": "You have reached the daily message limit. Upgrade to PREMIUM for unlimited messages.",
-                    "subscription": user.subscription,
-                    "allowed_messages": 10,
-                },
-                status=status.HTTP_429_TOO_MANY_REQUESTS,
-            )
+        logger.debug("User subscription: %s", user.subscription)
+        logger.debug("User message count: %d", message_log.message_count)
+
+        # Check if user is a STANDARD subscriber
+        if user.subscription == 'STANDARD':
+            if message_log.message_count >= 10:
+                logger.warning("Message limit reached for user: %s", user.name)
+                return Response({"error": "You have reached the daily message limit. Please try again after 24 hours."},
+                                status=status.HTTP_429_TOO_MANY_REQUESTS)
 
         serializer = self.get_serializer(data=mutable_data)
         serializer.is_valid(raise_exception=True)
+
+        # Save the new message
         self.perform_create(serializer)
 
         # Increment message count for STANDARD users
         if user.subscription == 'STANDARD':
-            UserMessageLog.objects.filter(user=user).update(message_count=F('message_count') + 1)
+            message_log.message_count += 1
+            message_log.save()
 
         headers = self.get_success_headers(serializer.data)
         return Response({"message": "Message created", "data": serializer.data}, status=status.HTTP_201_CREATED, headers=headers)
+
 
 
 class MessageListView(generics.ListAPIView):
