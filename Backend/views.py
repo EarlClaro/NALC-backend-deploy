@@ -225,17 +225,16 @@ class MessageCreateView(generics.CreateAPIView):
 
         logger.debug("Combined Query for db_chain: %s", combined_query)
 
-        # Call db_chain with the combined query
         try:
-            # Clean the query by removing Markdown-like code block delimiters
+            # Clean the query by removing Markdown-like delimiters
             sanitized_query = combined_query.replace("```sql", "").replace("```", "").strip()
 
-            # Log the sanitized query for debugging
+            # Log the sanitized query
             logger.debug("Sanitized SQL Query: %s", sanitized_query)
 
-            # Execute the query using db_chain
-            response = db_chain.run(sanitized_query)
-            
+            # Execute the query using db_chain.invoke
+            response = db_chain.invoke({"input": sanitized_query})
+
             if not response:
                 logger.error("db_chain returned None for query: %s", sanitized_query)
                 return Response({"error": "Error processing the query."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -249,7 +248,7 @@ class MessageCreateView(generics.CreateAPIView):
             }
         except Exception as e:
             logger.error("Error calling db_chain: %s", str(e))
-            return Response({"error": "Error processing the query."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({"error": f"Error processing the query: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Create a mutable copy of request.data
         mutable_data = request.data.copy()
