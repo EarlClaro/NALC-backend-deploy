@@ -212,43 +212,43 @@ class MessageCreateView(generics.CreateAPIView):
 
     def create(self, request, *args, **kwargs):
         thread_id = request.data.get("thread_id")
-        thread = get_object_or_404(Thread, pk=thread_id)
-
         query = request.data.get("query")
+        
+        if not thread_id or not query:
+            return Response({"error": "Thread ID and query are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        thread = get_object_or_404(Thread, pk=thread_id)
 
         # Fetch conversation history
         conversation_history = Message.objects.filter(thread=thread).order_by('created_at')
-        history_text = "\n".join([json.loads(msg.message_text)['query'] + "\n" + json.loads(msg.message_text)['response'] for msg in conversation_history])
+        history_text = "\n".join([
+            f"User: {json.loads(msg.message_text).get('query', '')}\n"
+            f"Assistant: {json.loads(msg.message_text).get('response', '')}"
+            for msg in conversation_history
+        ])
 
         # Combine history with the current query
-        combined_query = history_text + "\nUser: " + query
+        combined_query = f"{history_text}\nUser: {query}"
 
         logger.debug("Combined Query for db_chain: %s", combined_query)
 
+        # Call db_chain with the combined query
         try:
-            # Clean the query by removing Markdown-like delimiters
-            sanitized_query = combined_query.replace("```sql", "").replace("```", "").strip()
-
-            # Log the sanitized query
-            logger.debug("Sanitized SQL Query: %s", sanitized_query)
-
-            # Execute the query using db_chain.invoke
-            response = db_chain.invoke({"input": sanitized_query})
-
+            response = db_chain.invoke({"query": combined_query})
             if not response:
-                logger.error("db_chain returned None for query: %s", sanitized_query)
+                logger.error("db_chain returned None for query: %s", combined_query)
                 return Response({"error": "Error processing the query."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
             logger.debug("Response from db_chain: %s", response)
 
-            # Structure the message_text for easy mapping in React
+            # Structure the message_text for easy mapping
             message_text = {
                 'query': query,
                 'response': response.get("result", "No result found")
             }
         except Exception as e:
             logger.error("Error calling db_chain: %s", str(e))
-            return Response({"error": f"Error processing the query: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({"error": "Error processing the query."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Create a mutable copy of request.data
         mutable_data = request.data.copy()
@@ -275,8 +275,10 @@ class MessageCreateView(generics.CreateAPIView):
         if user.subscription == 'STANDARD':
             if message_log.message_count >= 10:
                 logger.warning("Message limit reached for user: %s", user.name)
-                return Response({"error": "You have reached the daily message limit. Please try again after 24 hours."},
-                                status=status.HTTP_429_TOO_MANY_REQUESTS)
+                return Response(
+                    {"error": "You have reached the daily message limit. Please try again after 24 hours."},
+                    status=status.HTTP_429_TOO_MANY_REQUESTS
+                )
 
         serializer = self.get_serializer(data=mutable_data)
         serializer.is_valid(raise_exception=True)
@@ -290,7 +292,11 @@ class MessageCreateView(generics.CreateAPIView):
             message_log.save()
 
         headers = self.get_success_headers(serializer.data)
-        return Response({"message": "Message created", "data": serializer.data}, status=status.HTTP_201_CREATED, headers=headers)
+        return Response(
+            {"message": "Message created", "data": serializer.data},
+            status=status.HTTP_201_CREATED,
+            headers=headers
+        )
 
 
 
