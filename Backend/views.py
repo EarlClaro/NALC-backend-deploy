@@ -225,11 +225,19 @@ class MessageCreateView(generics.CreateAPIView):
 
         logger.debug("Combined Query for db_chain: %s", combined_query)
 
-        # Call db_chain with the combined_query to consider past conversation
+        # Call db_chain with the combined query
         try:
-            response = db_chain.invoke(combined_query)
-            if response is None:
-                logger.error("db_chain returned None for query: %s", combined_query)
+            # Clean the query by removing Markdown-like code block delimiters
+            sanitized_query = combined_query.replace("```sql", "").replace("```", "").strip()
+
+            # Log the sanitized query for debugging
+            logger.debug("Sanitized SQL Query: %s", sanitized_query)
+
+            # Execute the query using db_chain
+            response = db_chain.run(sanitized_query)
+            
+            if not response:
+                logger.error("db_chain returned None for query: %s", sanitized_query)
                 return Response({"error": "Error processing the query."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
             logger.debug("Response from db_chain: %s", response)
