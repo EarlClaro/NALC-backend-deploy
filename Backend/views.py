@@ -189,24 +189,6 @@ class UserThreadListView(generics.ListAPIView):
         queryset = Thread.objects.filter(user=user)
         return queryset
 
-import logging
-from datetime import timedelta
-from django.utils.timezone import now
-from rest_framework import generics, status
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from django.shortcuts import get_object_or_404
-import json
-
-from .models import Thread, Message, UserMessageLog
-from .serializers import MessageSerializer
-
-# Set up logging
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)
-
-import re  # For cleaning up the SQL query
-
 import json
 import re
 import logging
@@ -220,6 +202,9 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from .models import Message, Thread, UserMessageLog
 from .serializers import MessageSerializer
+
+# Import MySQLdb to handle SQL-specific exceptions
+import MySQLdb
 
 logger = logging.getLogger(__name__)
 
@@ -236,7 +221,7 @@ class MessageCreateView(generics.CreateAPIView):
         # Remove Markdown-like SQL formatting
         sql_query = re.sub(r"```sql", "", sql_query)
         sql_query = re.sub(r"```", "", sql_query)
-        
+
         # Strip leading/trailing whitespace
         return sql_query.strip()
 
