@@ -204,6 +204,7 @@ from .serializers import MessageSerializer
 # Set up logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
+
 class MessageCreateView(generics.CreateAPIView):
     queryset = Message.objects.all()
     serializer_class = MessageSerializer
@@ -229,17 +230,7 @@ class MessageCreateView(generics.CreateAPIView):
             response = db_chain.invoke(combined_query)
             if response is None:
                 logger.error("db_chain returned None for query: %s", combined_query)
-                return Response({
-                    "error": {
-                        "title": "Processing Error",
-                        "message": "Error processing the query.",
-                        "style": {
-                            "backgroundColor": "#800000",  # Maroon
-                            "color": "#FFFFFF",  # White
-                            "borderColor": "#FFD700",  # Gold
-                        }
-                    }
-                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                return Response({"error": "Error processing the query."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
             logger.debug("Response from db_chain: %s", response)
 
@@ -250,17 +241,7 @@ class MessageCreateView(generics.CreateAPIView):
             }
         except Exception as e:
             logger.error("Error calling db_chain: %s", str(e))
-            return Response({
-                "error": {
-                    "title": "Processing Error",
-                    "message": "Error processing the query.",
-                    "style": {
-                        "backgroundColor": "#800000",  # Maroon
-                        "color": "#FFFFFF",  # White
-                        "borderColor": "#FFD700",  # Gold
-                    }
-                }
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({"error": "Error processing the query."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Create a mutable copy of request.data
         mutable_data = request.data.copy()
@@ -283,18 +264,47 @@ class MessageCreateView(generics.CreateAPIView):
         logger.debug("User subscription: %s", user.subscription)
         logger.debug("User message count: %d", message_log.message_count)
 
-        # Check if user is a STANDARD subscriber
+       # Check if user is a STANDARD subscriber
         if user.subscription == 'STANDARD':
             if message_log.message_count >= 10:
                 logger.warning("Message limit reached for user: %s", user.name)
                 return Response({
                     "error": {
                         "title": "Daily Message Limit Reached",
-                        "message": "You have reached the daily message limit of 10 messages. Please wait 24 hours to send more messages or consider shortening your query.",
-                        "style": {
-                            "backgroundColor": "#800000",  # Maroon
-                            "color": "#FFFFFF",  # White
-                            "borderColor": "#FFD700",  # Gold
+                        "message": (
+                            "You have reached your daily message limit of 10 messages. "
+                            "Please wait 24 hours for a reset or consider upgrading your subscription."
+                        ),
+                        "modal": {
+                            "headerStyle": {
+                                "backgroundColor": "#800000",  # Maroon
+                                "color": "#FFFFFF",  # White
+                                "borderBottom": "2px solid #FFD700",  # Gold border
+                                "padding": "15px",
+                                "fontWeight": "bold",
+                                "fontSize": "18px",
+                            },
+                            "bodyStyle": {
+                                "backgroundColor": "#FFFFFF",  # White
+                                "color": "#800000",  # Maroon
+                                "padding": "20px",
+                                "fontSize": "16px",
+                                "textAlign": "center",
+                            },
+                            "footerStyle": {
+                                "backgroundColor": "#FFD700",  # Gold
+                                "padding": "10px",
+                                "textAlign": "right",
+                            },
+                            "buttonStyle": {
+                                "backgroundColor": "#800000",  # Maroon
+                                "color": "#FFFFFF",  # White
+                                "border": "none",
+                                "padding": "10px 20px",
+                                "borderRadius": "5px",
+                                "cursor": "pointer",
+                            },
+                            "buttonText": "Okay",
                         }
                     }
                 }, status=status.HTTP_429_TOO_MANY_REQUESTS)
@@ -311,10 +321,8 @@ class MessageCreateView(generics.CreateAPIView):
             message_log.save()
 
         headers = self.get_success_headers(serializer.data)
-        return Response({
-            "message": "Message created",
-            "data": serializer.data
-        }, status=status.HTTP_201_CREATED, headers=headers)
+        return Response({"message": "Message created", "data": serializer.data}, status=status.HTTP_201_CREATED, headers=headers)
+
 
 
 class MessageListView(generics.ListAPIView):
