@@ -69,8 +69,8 @@ else:
 # else:
 #     raise ValueError("OpenAI API key not found.")
 
-# Initialize OpenAI with the API key
-llm = OpenAI(temperature=0, verbose=True)
+
+
 
 # Create the SQLDatabase instance with the MySQL connection URI
 # db = SQLDatabase.from_uri(f"mysql://{settings.DATABASES['default']['USER']}:{settings.DATABASES['default']['PASSWORD']}@{settings.DATABASES['default']['HOST']}:{settings.DATABASES['default']['PORT']}/{settings.DATABASES['default']['NAME']}", include_tables=[])
@@ -81,8 +81,10 @@ db = SQLDatabase.from_uri(f"mysql://{settings.DATABASES['default']['USER']}:{set
 # print("Connection URI:", connection_uri)  # Add this to debug the URI
 # db = SQLDatabase.from_uri(connection_uri, include_tables=[])
 
-llm = OpenAI(temperature=0, verbose=True)
 
+# Initialize OpenAI with the API key
+# Use gpt-4-turbo with higher max tokens
+llm = OpenAI(model="gpt-4-turbo", temperature=0, max_tokens=2000, verbose=True)
 db_chain = SQLDatabaseChain.from_llm(llm, db, verbose=True)
 
 
