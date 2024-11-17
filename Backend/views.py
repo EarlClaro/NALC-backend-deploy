@@ -198,6 +198,9 @@ from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 import json
 from openai.error import InvalidRequestError
+from openai import OpenAIError
+from openai.error import OpenAIError  # Generic OpenAI Error
+
 
 from .models import Thread, Message, UserMessageLog
 from .serializers import MessageSerializer
@@ -247,22 +250,22 @@ class MessageCreateView(generics.CreateAPIView):
         logger.debug("Combined Query for db_chain: %s", combined_query)
 
         try:
-            # Call db_chain with the combined query
             response = db_chain.invoke(combined_query)
-
-            if response is None or "result" not in response:
-                logger.error("db_chain returned an unexpected response for query: %s", combined_query)
+            if response is None:
+                logger.error("db_chain returned None for query: %s", combined_query)
+                return Response({"error": "Error processing the query."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except OpenAIError as e:
+            logger.error("Error calling db_chain: %s", str(e))
+            if "maximum context length" in str(e):
                 return Response(
-                    {"error": "An unexpected error occurred while processing your request. Please try again later."},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    {
+                        "error": "Your prompt is too long. Please shorten the prompt or reduce the history context.",
+                        "details": str(e),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
+            return Response({"error": "An unexpected error occurred."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-            logger.debug("Response from db_chain: %s", response)
-
-            message_text = {
-                'query': query,
-                'response': response.get("result", "No result found")
-            }
 
         except InvalidRequestError as e:
             error_details = e.error
