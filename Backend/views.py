@@ -69,22 +69,20 @@ else:
 # else:
 #     raise ValueError("OpenAI API key not found.")
 
+from langchain.chat_models import ChatOpenAI
+from langchain_experimental.sql import SQLDatabaseChain
+from langchain_community.utilities import SQLDatabase
 
-
+# Use ChatOpenAI for chat-based models like gpt-4-turbo
+llm = ChatOpenAI(model="gpt-4-turbo", temperature=0, max_tokens=2000, verbose=True)
 
 # Create the SQLDatabase instance with the MySQL connection URI
-# db = SQLDatabase.from_uri(f"mysql://{settings.DATABASES['default']['USER']}:{settings.DATABASES['default']['PASSWORD']}@{settings.DATABASES['default']['HOST']}:{settings.DATABASES['default']['PORT']}/{settings.DATABASES['default']['NAME']}", include_tables=[])
-db = SQLDatabase.from_uri(f"mysql://{settings.DATABASES['default']['USER']}:{settings.DATABASES['default']['PASSWORD'].replace('@', '%40')}@{settings.DATABASES['default']['HOST']}:{settings.DATABASES['default']['PORT']}/{settings.DATABASES['default']['NAME']}", include_tables=[])
+db = SQLDatabase.from_uri(
+    f"mysql://{settings.DATABASES['default']['USER']}:{settings.DATABASES['default']['PASSWORD'].replace('@', '%40')}@{settings.DATABASES['default']['HOST']}:{settings.DATABASES['default']['PORT']}/{settings.DATABASES['default']['NAME']}",
+    include_tables=[]  # Adjust as necessary to include or exclude specific tables
+)
 
-
-# connection_uri = f"mysql://{settings.DATABASES['default']['USER']}:{settings.DATABASES['default']['PASSWORD']}@{settings.DATABASES['default']['HOST']}:{settings.DATABASES['default']['PORT']}/{settings.DATABASES['default']['NAME']}"
-# print("Connection URI:", connection_uri)  # Add this to debug the URI
-# db = SQLDatabase.from_uri(connection_uri, include_tables=[])
-
-
-# Initialize OpenAI with the API key
-# Use gpt-4-turbo with higher max tokens
-llm = OpenAI(model="gpt-4-turbo", temperature=0, max_tokens=2000, verbose=True)
+# Initialize the SQLDatabaseChain with the ChatOpenAI model
 db_chain = SQLDatabaseChain.from_llm(llm, db, verbose=True)
 
 
