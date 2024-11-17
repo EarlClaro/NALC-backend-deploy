@@ -188,7 +188,6 @@ class UserThreadListView(generics.ListAPIView):
         # Filter threads associated with the authenticated user
         queryset = Thread.objects.filter(user=user)
         return queryset
-
 import json
 import re
 import logging
@@ -200,10 +199,10 @@ from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from langchain_openai import ChatOpenAI  # Updated import
+import MySQLdb  # To handle MySQL-specific exceptions
 from .models import Message, Thread, UserMessageLog
 from .serializers import MessageSerializer
-from langchain_openai import ChatOpenAI  # Updated import
-import MySQLdb  # For handling MySQL-specific exceptions
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +213,7 @@ class MessageCreateView(generics.CreateAPIView):
 
     def clean_sql_query(self, sql_query):
         """
-        Cleans up the SQL query to remove Markdown-style formatting.
+        Removes Markdown-style formatting from the SQL query.
         """
         sql_query = re.sub(r"```sql", "", sql_query)
         sql_query = re.sub(r"```", "", sql_query)
@@ -227,7 +226,10 @@ class MessageCreateView(generics.CreateAPIView):
         if not thread_id or not query:
             return Response({"error": "Thread ID and query are required."}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Fetch the thread
         thread = get_object_or_404(Thread, pk=thread_id)
+
+        # Fetch conversation history
         conversation_history = Message.objects.filter(thread=thread).order_by('created_at')
         history_text = "\n".join([
             f"User: {json.loads(msg.message_text)['query']}\nAI: {json.loads(msg.message_text)['response']}" 
@@ -238,11 +240,13 @@ class MessageCreateView(generics.CreateAPIView):
         logger.debug("Combined Query for db_chain: %s", combined_query)
 
         try:
+            # Generate SQL query using LangChain
             response = db_chain.invoke({"query": combined_query})
             if not response:
                 logger.error("db_chain returned None for query: %s", combined_query)
                 return Response({"error": "Error processing the query."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+            # Clean the SQL query
             sql_query = self.clean_sql_query(response.get("sql_query", ""))
             if not sql_query:
                 logger.error("Generated SQL query is empty or invalid: %s", sql_query)
@@ -250,23 +254,30 @@ class MessageCreateView(generics.CreateAPIView):
 
             logger.debug("Cleaned SQL Query: %s", sql_query)
 
+            # Execute the cleaned SQL query
             with connections['default'].cursor() as cursor:
                 cursor.execute(sql_query)
                 results = cursor.fetchall()
 
             logger.debug("SQL Query Results: %s", results)
 
+            # Format the response
             formatted_response = {
                 "query": query,
                 "response": results
             }
+
         except MySQLdb.ProgrammingError as e:
             logger.error("SQL Programming Error: %s", str(e))
             return Response({"error": "Invalid SQL syntax."}, status=status.HTTP_400_BAD_REQUEST)
+        except AttributeError as e:
+            logger.error("AttributeError in callback: %s", str(e))
+            return Response({"error": "Internal server error."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         except Exception as e:
             logger.error("Error processing the query or executing SQL: %s", str(e))
             return Response({"error": "Error processing the query or executing SQL."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+        # Save the message in the database
         mutable_data = request.data.copy()
         mutable_data["thread"] = thread.pk
         mutable_data["message_text"] = json.dumps(formatted_response)
@@ -274,11 +285,13 @@ class MessageCreateView(generics.CreateAPIView):
         user = request.user
         message_log, created = UserMessageLog.objects.get_or_create(user=user)
 
+        # Reset message count if 24 hours have passed
         if now() - message_log.last_reset > timedelta(days=1):
             message_log.message_count = 0
             message_log.last_reset = now()
             message_log.save()
 
+        # Limit STANDARD users to 10 messages/day
         if user.subscription == 'STANDARD' and message_log.message_count >= 10:
             return Response(
                 {
@@ -293,6 +306,7 @@ class MessageCreateView(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
 
+        # Increment message count for STANDARD users
         if user.subscription == 'STANDARD':
             UserMessageLog.objects.filter(user=user).update(message_count=F('message_count') + 1)
 
