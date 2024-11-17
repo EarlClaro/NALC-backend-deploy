@@ -213,27 +213,27 @@ class MessageCreateView(generics.CreateAPIView):
     def create(self, request, *args, **kwargs):
         thread_id = request.data.get("thread_id")
         query = request.data.get("query")
-        
+
         if not thread_id or not query:
             return Response({"error": "Thread ID and query are required."}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Fetch the thread
         thread = get_object_or_404(Thread, pk=thread_id)
 
         # Fetch conversation history
         conversation_history = Message.objects.filter(thread=thread).order_by('created_at')
         history_text = "\n".join([
-            f"User: {json.loads(msg.message_text).get('query', '')}\n"
-            f"Assistant: {json.loads(msg.message_text).get('response', '')}"
+            f"User: {json.loads(msg.message_text)['query']}\nAI: {json.loads(msg.message_text)['response']}" 
             for msg in conversation_history
         ])
 
         # Combine history with the current query
-        combined_query = f"{history_text}\nUser: {query}"
+        combined_query = history_text + f"\nUser: {query}"
 
         logger.debug("Combined Query for db_chain: %s", combined_query)
 
-        # Call db_chain with the combined query
         try:
+            # Explicitly pass the required input to db_chain
             response = db_chain.invoke({"query": combined_query})
             if not response:
                 logger.error("db_chain returned None for query: %s", combined_query)
@@ -241,10 +241,10 @@ class MessageCreateView(generics.CreateAPIView):
 
             logger.debug("Response from db_chain: %s", response)
 
-            # Structure the message_text for easy mapping
+            # Structure the message_text for easy mapping in React
             message_text = {
-                'query': query,
-                'response': response.get("result", "No result found")
+                "query": query,
+                "response": response.get("result", "No result found")
             }
         except Exception as e:
             logger.error("Error calling db_chain: %s", str(e))
@@ -255,7 +255,7 @@ class MessageCreateView(generics.CreateAPIView):
         mutable_data["thread"] = thread.pk
         mutable_data["message_text"] = json.dumps(message_text)
 
-        # Check message limit for STANDARD users
+        # Check message limits for STANDARD users
         user = request.user
         message_log, created = UserMessageLog.objects.get_or_create(user=user)
 
@@ -272,18 +272,15 @@ class MessageCreateView(generics.CreateAPIView):
         logger.debug("User message count: %d", message_log.message_count)
 
         # Check if user is a STANDARD subscriber
-        if user.subscription == 'STANDARD':
-            if message_log.message_count >= 10:
-                logger.warning("Message limit reached for user: %s", user.name)
-                return Response(
-                    {"error": "You have reached the daily message limit. Please try again after 24 hours."},
-                    status=status.HTTP_429_TOO_MANY_REQUESTS
-                )
+        if user.subscription == 'STANDARD' and message_log.message_count >= 10:
+            logger.warning("Message limit reached for user: %s", user.email)
+            return Response(
+                {"error": "You have reached the daily message limit. Please try again after 24 hours."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
 
         serializer = self.get_serializer(data=mutable_data)
         serializer.is_valid(raise_exception=True)
-
-        # Save the new message
         self.perform_create(serializer)
 
         # Increment message count for STANDARD users
@@ -292,12 +289,7 @@ class MessageCreateView(generics.CreateAPIView):
             message_log.save()
 
         headers = self.get_success_headers(serializer.data)
-        return Response(
-            {"message": "Message created", "data": serializer.data},
-            status=status.HTTP_201_CREATED,
-            headers=headers
-        )
-
+        return Response({"message": "Message created", "data": serializer.data}, status=status.HTTP_201_CREATED, headers=headers)
 
 
 class MessageListView(generics.ListAPIView):
